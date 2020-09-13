@@ -1,0 +1,69 @@
+---
+title: "Initial look"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(skimr)
+library(scales)
+library(glue)
+library(usmap)
+```
+
+Read in 5-year data from 2016
+
+```{r}
+acs2016 <- data.table::fread("../../data/productDownload_2020-06-21T184454/ACSDT5Y2016.C16001_data_with_overlays_2020-06-21T184446.csv", 
+                    skip = 1) %>%
+  clean_names() %>%
+  # shorten names
+  rename(county = geographic_area_name) %>%
+  separate(county, c('county','state'), sep = ', ') %>%
+  rename_all(~ str_remove(.x, 'estimate_')) %>%
+  rename_all(~ str_replace(.x, 'speak_english_very_well', 'sevw')) %>%
+  rename_all(~ str_replace(.x, 'speak_.*_less_than_very_well', 'seltvw')) %>%
+  rename_all(~ str_remove(.x, '_languages')) %>%
+  rename_all(~ str_remove(.x, 'total_')) %>%
+  rename_all(~ str_remove(.x, '_haitian.*cajun')) %>%
+  rename_all(~ str_remove(.x, '_or_other_west.*germanic')) %>%
+  rename_all(~ str_remove(.x, 'russian_polish_or_other_')) %>%
+  rename_all(~ str_remove(.x, '_incl_mandarin_cantonese')) %>%
+  rename_all(~ str_remove(.x, '_incl_filipino')) %>%
+  rename_all(~ str_replace(.x, 'asian_and_pacific_island', 'api')) %>%
+  rename_all(~ str_replace(.x, 'margin_of_error_(.*)', '\\1_err')) %>%
+  rename_all(~ str_replace(.x, 'other_indo_european', 'other_ie')) %>%
+  rename_all(~ str_replace(.x, 'and_unspecified', 'unsp')) %>%
+  # remove non-numeric values
+  mutate_all(~ na_if(.x, '*****') %>%
+               na_if('null')) %>%
+  mutate_at(vars(-c(id, county, state)), as.numeric)
+
+skim(acs2016)
+```
+
+What's with the surprisingly high number of Tagalog speakers in some counties in Maine?
+
+```{r}
+filter(acs2016, state == 'Maine') %>%
+  mutate(rate = percent(tagalog / total, .01),
+         lo = percent((tagalog - tagalog_err)/total, .01),
+         hi = percent((tagalog + tagalog_err)/total, .01),
+         range = glue('{lo}\u2014{hi}') 
+         ) %>%
+  select(id, county, tagalog, total, rate, range) %>%
+  arrange(desc(rate))
+```
+
+```{r}
+map_data <- filter(acs2016, state == 'Maine') %>%
+  mutate(rate = (tagalog / total) * 100,
+         lo = ((tagalog - tagalog_err)/total),
+         hi = ((tagalog + tagalog_err)/total),
+         fips = str_extract(id, '.....$')
+         ) 
+
+plot_usmap('counties', data = map_data, include = 'ME', values = 'rate')
+```
+
